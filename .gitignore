@@ -1,1 +1,7 @@
-/__pycache__
+## Python caches and artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+
+## Virtual environments
+.venv/

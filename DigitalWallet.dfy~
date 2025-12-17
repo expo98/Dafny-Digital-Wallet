@@ -1,0 +1,152 @@
+class DigitalWallet {
+    // 1. STATE VARIABLES
+    var Balances: map<int, int>
+    var PINs: map<int, int>
+    var WrongAttempts: map<int, int>
+    const MaxWrongAttempts: int := 3
+
+    // 2. CONSTRUCTOR
+    constructor() {
+        Balances := map[];
+        PINs := map[];
+        WrongAttempts := map[];
+    }
+
+    invariant Balances.Keys == PINs.Keys && PINs.Keys == WrongAttempts.Keys
+    invariant forall userId :: userId in Balances ==> Balances[userId] >= 0
+
+    // 4. PREDICATES AND FUNCTIONS
+    predicate AccountIsLocked(userId: int) 
+        reads this
+    {
+        userId in Balances && WrongAttempts[userId] >= MaxWrongAttempts
+    }
+    
+    function TotalFunds(): int
+        reads this
+    {
+        sum userId :: userId in Balances @ Balances[userId]
+    }
+
+    // 5. METHODS
+    
+    // Function 1: NewAccount
+    method NewAccount(userId: int, initialBalance: int, pin: int) 
+        modifies this 
+        requires userId !in Balances                  
+        requires initialBalance >= 0                  
+        
+        ensures userId in Balances                    
+        ensures Balances[userId] == initialBalance    
+        ensures PINs[userId] == pin                   
+        ensures WrongAttempts[userId] == 0            
+        ensures TotalFunds() == old(TotalFunds()) + initialBalance 
+    {
+        Balances := Balances + map[userId := initialBalance];
+        PINs := PINs + map[userId := pin];
+        WrongAttempts := WrongAttempts + map[userId := 0];
+    }
+
+    // Function 2: Authenticate
+    method Authenticate(userId: int, pin: int) returns (isSuccessful: bool) 
+        modifies this 
+        requires userId in PINs                       
+        
+        ensures isSuccessful == (PINs[userId] == pin && !AccountIsLocked(userId)) 
+        
+        ensures isSuccessful ==> WrongAttempts[userId] == 0 
+        
+        ensures !isSuccessful && userId in PINs && PINs[userId] != pin && !old(AccountIsLocked(userId))
+            ==> WrongAttempts[userId] == old(WrongAttempts[userId]) + 1
+            
+        ensures !isSuccessful && old(AccountIsLocked(userId)) 
+            ==> WrongAttempts[userId] == old(WrongAttempts[userId]) 
+        
+        ensures Balances == old(Balances)
+        ensures PINs == old(PINs)
+        ensures TotalFunds() == old(TotalFunds())
+    {
+        var currentAttempts := WrongAttempts[userId];
+        if !AccountIsLocked(userId) && PINs[userId] == pin {
+            WrongAttempts := WrongAttempts + map[userId := 0];
+            return true;
+        } else if !AccountIsLocked(userId) && PINs[userId] != pin {
+            WrongAttempts := WrongAttempts + map[userId := currentAttempts + 1];
+            return false;
+        } else {
+            return false;
+        }
+    }
+    
+    // Function 3: GetBalance
+    method GetBalance(userId: int, pin: int) returns (balance: int) 
+        reads this
+        requires userId in Balances 
+        requires pin == PINs[userId]                  
+        requires !AccountIsLocked(userId)            
+        
+        ensures balance == Balances[userId]          
+        ensures this == old(this)                    
+    {
+        return Balances[userId];
+    }
+    
+    // Function 4: Credit
+    method Credit(userId: int, pin: int, amount: int) 
+        modifies this 
+        requires userId in Balances
+        requires pin == PINs[userId]
+        requires !AccountIsLocked(userId)
+        requires amount > 0                           
+        
+        ensures Balances[userId] == old(Balances[userId]) + amount 
+        ensures TotalFunds() == old(TotalFunds()) + amount           
+        ensures forall id :: id in Balances && id != userId ==> Balances[id] == old(Balances[id]) 
+                                                                 
+    {
+        Balances := Balances + map[userId := Balances[userId] + amount];
+    }
+    
+    // Function 5: Transfer
+    method Transfer(sourceId: int, sourcePin: int, destinationId: int, amount: int) 
+        modifies this 
+        requires sourceId in Balances && destinationId in Balances 
+        requires sourceId != destinationId                         
+        
+        requires sourcePin == PINs[sourceId] && !AccountIsLocked(sourceId) 
+        
+        requires amount > 0                                        
+        requires Balances[sourceId] >= amount                      
+        
+        ensures Balances[sourceId] == old(Balances[sourceId]) - amount
+        
+        ensures Balances[destinationId] == old(Balances[destinationId]) + amount
+        
+        ensures TotalFunds() == old(TotalFunds()) 
+        
+        ensures forall id :: id in Balances && id != sourceId && id != destinationId 
+            ==> Balances[id] == old(Balances[id])
+    {
+        Balances := Balances + map[sourceId := Balances[sourceId] - amount];
+        Balances := Balances + map[destinationId := Balances[destinationId] + amount];
+    }
+    
+    // Function 6: AddInterest
+    method AddInterest(ratePercentage: int)
+        modifies this
+        requires ratePercentage >= 0 
+        
+        ensures forall userId :: userId in Balances 
+            ==> Balances[userId] == old(Balances[userId]) + (old(Balances[userId]) * ratePercentage / 100) 
+            
+        ensures TotalFunds() >= old(TotalFunds()) 
+    {
+        var newBalances := Balances;
+        for user in Balances.Keys {
+            var currentBalance := Balances[user];
+            var interest := (currentBalance * ratePercentage) / 100;
+            newBalances := newBalances + map[user := currentBalance + interest];
+        }
+        Balances := newBalances;
+    }
+}
